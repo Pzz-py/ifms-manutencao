@@ -1,0 +1,5 @@
+# Garante LF (Unix) em scripts shell, mesmo clonando no Windows.
+# Sem isso, o Git pode converter para CRLF e o container falha ao
+# iniciar com um erro parecido com:
+#   exec /app/docker-entrypoint.sh: no such file or directory
+*.sh text eol=lf
