@@ -141,6 +141,10 @@ cd frontend
 npm install
 npm run dev
 ```
+ou
+cd frontend                                                                                                                                                  
+>> npm install --legacy-peer-deps
+>> npm run dev
 
 A aplicação sobe em `http://localhost:5173`. As chamadas para `/api` são
 redirecionadas automaticamente para o backend (ver `vite.config.js`).
