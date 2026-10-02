@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    @apply bg-neutral-50 text-neutral-800 font-sans;
+  }
+
+  /* Estado de foco visível para acessibilidade (navegação por teclado) */
+  :focus-visible {
+    @apply outline-none ring-2 ring-primary-500 ring-offset-2 ring-offset-white;
+  }
+}
+
+@layer components {
+  /* Classe base reutilizada pelos cards do dashboard, listas e formulários */
+  .surface-card {
+    @apply bg-white border border-neutral-200 rounded-xl shadow-card;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   Impressão / exportação em PDF do relatório do chamado.
+
+   Estratégia: em vez de gerar o PDF no servidor (o que exigiria uma
+   biblioteca nova e uma rota dedicada), reaproveitamos a própria tela
+   de detalhes — que já reúne todas as informações do relatório — e
+   escondemos na impressão tudo que é navegação ou controle de edição.
+   O usuário usa "Salvar como PDF" no diálogo de impressão do navegador.
+
+   Marque com `.no-print` qualquer elemento que não deve sair no papel.
+   --------------------------------------------------------------------- */
+@media print {
+  /* Esconde navegação, botões e formulários de edição. */
+  .no-print,
+  aside,
+  header {
+    display: none !important;
+  }
+
+  /* Remove fundos e sombras que desperdiçam tinta e atrapalham a leitura. */
+  body {
+    background: #fff !important;
+  }
+
+  .surface-card {
+    border: 1px solid #d5d8dd !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+
+  /* A tela usa um grid de 3 colunas; no papel, uma coluna só lê melhor. */
+  .print-single-column {
+    display: block !important;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+
+  /* Garante que as cores dos badges de status/prioridade apareçam
+     na impressão (por padrão os navegadores removem fundos). */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  @page {
+    margin: 1.5cm;
+  }
+}

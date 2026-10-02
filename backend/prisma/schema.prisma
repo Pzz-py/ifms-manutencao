@@ -1,0 +1,283 @@
+// ==========================================================
+// Sistema de Chamados de Manutenção — IFMS Campus Jardim
+// Prisma Schema
+// ==========================================================
+//
+// IMPORTANTE SOBRE ENUMS:
+// O conector SQLite do Prisma não suporta o tipo "enum" nativo
+// (o Prisma lança "The current connector does not support enums").
+// Por isso, todos os campos que representam um conjunto fixo de
+// valores (role, categoria, prioridade, status, tipo de evento,
+// tipo de notificação) são modelados como String, com os valores
+// permitidos documentados aqui e centralizados em código no arquivo
+// `backend/src/utils/constants.js`, que também é usado para validação
+// na camada de serviço antes de gravar no banco.
+//
+// Caso o projeto migre no futuro para PostgreSQL ou MySQL, esses
+// campos podem voltar a ser enums nativos do Prisma sem qualquer
+// mudança na modelagem de relacionamentos abaixo.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------------
+// MODELOS
+// ----------------------------------------------------------
+
+model Usuario {
+  id        String   @id @default(cuid())
+  nome      String
+  email     String   @unique
+  senhaHash String
+  // Valores permitidos: "USUARIO" | "ADMINISTRADOR" (ver constants.js -> ROLES)
+  role      String   @default("USUARIO")
+  ativo     Boolean  @default(true)
+  avatarUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Chamados abertos por este usuário (solicitante)
+  chamadosSolicitados Chamado[] @relation("ChamadoSolicitante")
+
+  // Chamados atribuídos a este usuário (quando é administrador/técnico)
+  chamadosResponsavel Chamado[] @relation("ChamadoResponsavel")
+
+  observacoes    Observacao[]
+  eventos        HistoricoChamado[]
+  notificacoes   Notificacao[]
+  anexosEnviados Anexo[]
+
+  @@map("usuarios")
+}
+
+// Ambientes/locais do campus onde os chamados podem ocorrer.
+// Mantido como tabela simples e independente para permitir
+// gestão futura (ex: cadastro dinâmico pelo admin).
+//
+// `codigo` é o identificador público e curto usado no QR Code de cada
+// ambiente (ver backend/src/utils/codigo.js). É separado do `id`
+// interno (cuid) para manter uma URL curta e estável mesmo se algum
+// dia o registro precisar ser recriado.
+model Local {
+  id        String   @id @default(cuid())
+  nome      String   @unique
+  bloco     String?
+  descricao String?
+  codigo    String   @unique
+  ativo     Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  chamados Chamado[]
+
+  @@map("locais")
+}
+
+model Chamado {
+  id     String @id @default(cuid())
+  // Número amigável exibido na interface, ex: "CH-0001".
+  // O SQLite só permite @default(autoincrement()) no campo que é
+  // a chave primária, então este número é calculado na camada de
+  // serviço (services/chamado.service.js) no momento da criação,
+  // de forma sequencial e única.
+  numero Int @unique
+
+  titulo    String
+  descricao String
+
+  // Valores permitidos: ver constants.js -> CATEGORIAS
+  categoria String
+
+  // Valores permitidos: "BAIXA" | "MEDIA" | "ALTA" | "URGENTE" (ver constants.js -> PRIORIDADES)
+  prioridade String @default("MEDIA")
+
+  // Valores permitidos: ver constants.js -> STATUS_CHAMADO
+  status String @default("NOVO")
+
+  localId String
+  local   Local  @relation(fields: [localId], references: [id])
+
+  // Abertura sem login: o chamado pode não ter um Usuario vinculado.
+  // Quando aberto por alguém autenticado, solicitanteId é preenchido
+  // normalmente. Quando aberto de forma anônima (fluxo público do QR
+  // Code), solicitanteId fica nulo e o nome/contato — ambos opcionais,
+  // informados livremente por quem abriu — ficam nos campos abaixo.
+  solicitanteId String?
+  solicitante   Usuario? @relation("ChamadoSolicitante", fields: [solicitanteId], references: [id])
+
+  solicitanteNome    String?
+  solicitanteContato String?
+
+  // Endereço IP de quem abriu o chamado, para fins de auditoria básica
+  // (não coletamos nenhum outro dado pessoal do solicitante anônimo).
+  ipAbertura String?
+
+  responsavelId String?
+  responsavel   Usuario? @relation("ChamadoResponsavel", fields: [responsavelId], references: [id])
+
+  dataConclusao DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  observacoes  Observacao[]
+  historico    HistoricoChamado[]
+  anexos       Anexo[]
+  notificacoes Notificacao[]
+  materiais    Material[]
+
+  @@map("chamados")
+  @@index([status])
+  @@index([prioridade])
+  @@index([categoria])
+  @@index([solicitanteId])
+  @@index([responsavelId])
+}
+
+// Observações/comentários adicionados por administradores (ou
+// futuramente pelo solicitante) ao longo do atendimento.
+model Observacao {
+  id        String   @id @default(cuid())
+  texto     String
+  createdAt DateTime @default(now())
+
+  chamadoId String
+  chamado   Chamado @relation(fields: [chamadoId], references: [id], onDelete: Cascade)
+
+  autorId String
+  autor   Usuario @relation(fields: [autorId], references: [id])
+
+  @@map("observacoes")
+  @@index([chamadoId])
+}
+
+// Linha do tempo/auditoria do chamado. Cada alteração relevante
+// gera um registro aqui, o que alimenta o histórico completo
+// exigido no escopo sem precisar reconstruir estado a partir de logs externos.
+model HistoricoChamado {
+  id    String @id @default(cuid())
+  // Valores permitidos: ver constants.js -> TIPOS_EVENTO
+  tipo          String
+  descricao     String
+  valorAnterior String?
+  valorNovo     String?
+  createdAt     DateTime @default(now())
+
+  chamadoId String
+  chamado   Chamado @relation(fields: [chamadoId], references: [id], onDelete: Cascade)
+
+  // Nulo quando o evento foi gerado por uma ação anônima (ex: abertura
+  // de chamado sem login pelo QR Code) — nesses casos a interface exibe
+  // "Solicitante" no lugar do nome de um usuário.
+  autorId String?
+  autor   Usuario? @relation(fields: [autorId], references: [id])
+
+  @@map("historico_chamados")
+  @@index([chamadoId])
+}
+
+// Anexos de imagem enviados junto ao chamado (ex: foto do problema).
+// No protótipo os arquivos ficam salvos localmente em /uploads
+// e apenas o caminho relativo é persistido no banco.
+model Anexo {
+  id           String   @id @default(cuid())
+  nomeArquivo  String
+  caminho      String
+  tipoArquivo  String
+  tamanhoBytes Int
+  createdAt    DateTime @default(now())
+
+  chamadoId String
+  chamado   Chamado @relation(fields: [chamadoId], references: [id], onDelete: Cascade)
+
+  // Nulo quando o anexo veio de uma abertura de chamado sem login.
+  enviadoPorId String?
+  enviadoPor   Usuario? @relation(fields: [enviadoPorId], references: [id])
+
+  @@map("anexos")
+  @@index([chamadoId])
+}
+
+// Notificações internas simples (sem envio externo de e-mail/push).
+// Permitem ao usuário e ao administrador saberem de mudanças
+// relevantes diretamente dentro do sistema.
+model Notificacao {
+  id    String @id @default(cuid())
+  // Valores permitidos: ver constants.js -> TIPOS_NOTIFICACAO
+  tipo      String
+  titulo    String
+  mensagem  String
+  lida      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  destinatarioId String
+  destinatario   Usuario @relation(fields: [destinatarioId], references: [id], onDelete: Cascade)
+
+  chamadoId String?
+  chamado   Chamado? @relation(fields: [chamadoId], references: [id], onDelete: Cascade)
+
+  @@map("notificacoes")
+  @@index([destinatarioId])
+  @@index([lida])
+}
+
+// Materiais necessários/utilizados na manutenção do chamado.
+// Estrutura simples e proposital: não é um sistema de estoque, apenas
+// um registro do que foi pedido e do que foi de fato usado, para dar
+// visibilidade no relatório final do chamado.
+model Material {
+  id           String   @id @default(cuid())
+  nome         String
+  quantidade   Int      @default(1)
+  observacao   String?
+  // Foi pedido/é necessário para a manutenção.
+  necessario   Boolean  @default(true)
+  // Já foi de fato utilizado na execução.
+  utilizado    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+
+  chamadoId String
+  chamado   Chamado @relation(fields: [chamadoId], references: [id], onDelete: Cascade)
+
+  // Vínculo opcional com o catálogo de materiais. `nome` acima é uma cópia
+  // (snapshot): se o item do catálogo for removido, o registro de uso
+  // no chamado continua intacto, só perde o vínculo.
+  catalogoId String?
+  catalogo   MaterialCatalogo? @relation(fields: [catalogoId], references: [id], onDelete: SetNull)
+
+  @@map("materiais")
+  @@index([chamadoId])
+}
+
+// Categorias de chamado geridas pela administração. `Chamado.categoria`
+// continua sendo uma String que guarda o `codigo` desta tabela (sem FK),
+// de propósito: chamados antigos nunca perdem a categoria, mesmo que ela
+// seja desativada. O código é imutável; só o nome pode ser editado.
+model CategoriaChamado {
+  id        String   @id @default(cuid())
+  nome      String   @unique
+  codigo    String   @unique
+  ativo     Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@map("categorias_chamado")
+}
+
+// Catálogo de materiais, gerido pela administração (adicionar, editar,
+// remover). Serve de base para registrar, em cada chamado, os materiais
+// necessários/gastos na resolução. Não é um controle de estoque.
+model MaterialCatalogo {
+  id        String   @id @default(cuid())
+  nome      String   @unique
+  unidade   String?
+  createdAt DateTime @default(now())
+
+  usos Material[]
+
+  @@map("materiais_catalogo")
+}
