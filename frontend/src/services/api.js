@@ -7,7 +7,7 @@ import axios from "axios";
  * sejam servidos sob o mesmo domínio.
  */
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
+  baseURL: import.meta.env.VITE_API_URL || "/api",
 });
 
 // Anexa o token JWT (se existir) em toda requisição.
