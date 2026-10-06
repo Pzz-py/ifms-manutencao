@@ -22,5 +22,8 @@ mkdir -p /app/data
 echo "🗄  Sincronizando o schema do banco de dados (prisma db push)..."
 npx prisma db push --accept-data-loss --skip-generate
 
+echo "🌱 Executando seed inicial..."
+npx prisma db seed
+
 echo "🚀 Iniciando a API..."
 exec node src/server.js
