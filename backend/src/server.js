@@ -20,7 +20,7 @@ categoriaChamadoService
     )
   );
 
-app.listen(PORT, () => {
-  console.log(`\n🚀 API rodando em http://localhost:${PORT}`);
-  console.log(`   Health check: http://localhost:${PORT}/api/health\n`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`\n🚀 API rodando na porta ${PORT}`);
+  console.log(`   Health check: /api/health\n`);
 });
